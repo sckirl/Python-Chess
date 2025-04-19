@@ -1,0 +1,174 @@
+import pygame
+import sys
+import os
+import random
+import Rules
+
+pygame.init()
+
+WIN = pygame.display.set_mode((400, 400))
+pygame.display.set_caption("Chess")
+
+icon = pygame.image.load("pygame10/images/nB.png").convert_alpha()
+pygame.display.set_icon(icon)
+
+CLOCK = pygame.time.Clock()
+
+# for the history of the board movements
+class LinkedList:
+    def __init__(self, parent=None, node=None):
+        self.parent = parent
+        self.node = node
+
+class Board:
+    def __init__(self, side=random.choice(["W", "B"])):
+        self.pieces = {}
+        self.imgs = {}
+        self.pieceRoutes = []
+
+        self.movePiece = None
+        self.side = side
+        
+        self.turn = True
+        self.rules = Rules.Rules(pieces=self.pieces, side=self.side)
+        # self.check = Checks(self.pieces)
+
+        def load(source=os.listdir("pygame10/images")):
+            # load images of chess pieces
+            for file in source:
+                img = pygame.image.load("pygame10/images/" + file).convert_alpha()
+                img = pygame.transform.smoothscale(img, (50, 50))
+
+                # get the name; split "images/FILE.png" to ["images", "FILE.png"], 
+                # get the last value. split the FILE.png to ["FILE", "png"] get 0th index
+                name = file.split("/")[-1].split(".")[0]
+                self.imgs.update({name : img})
+                
+                setPositions(name)
+            
+        def setPositions(name):
+            # set default position of each piece
+
+            # in positions dict, the values represent the quantity 
+            # of piece in a board and its first position in the board
+            positions = {
+                "p" : [8, (0, 50)],     # pawn
+                "r" : [2, (0, 0)],      # rook
+                "b" : [2, (50, 0)],     # bishop 
+                "n" : [2, (100, 0)],    # knight
+                "q" : [1, (150, 0)],    # queen
+                "k" : [1, (200, 0)]     # king
+            }
+            piece = positions[name[0]]
+            
+            # put the default placement according to randomized side
+            if name[1] == self.side: 
+                piece[1] = (piece[1][0], 350-piece[1][1])
+
+            if name[0] == "k" or name[0] == "q": 
+                # if the piece is a queen or a king (single pieces in chess), 
+                # update the dictionary and return
+                return self.pieces.update({name+"0" : piece[1]})
+
+            for i in range(0, (piece[0]*50)//2, 50):
+                # fills the last and first part of the chess board, 
+                # because each piece (excluding king and queen) seem to be 
+                # proportional on both sides. So this decreases the time complexity to O(n/2)
+                self.pieces.update({name+str(i//50) : ((piece[1][0] + i), piece[1][1])}) # first
+                self.pieces.update({name+str((piece[0]-1) - (i//50)) : (350-piece[1][0]-i, piece[1][1])}) # last
+
+        load()
+
+    def move(self):
+        # get mouse position and round the number so it fits within the grids
+        x, y = pygame.mouse.get_pos() 
+        x, y = (x//50)*50, (y//50)*50
+
+        if pygame.mouse.get_pressed()[0] and \
+            (x, y) in self.pieces.values() and \
+                not self.movePiece:
+
+            piece = list(self.pieces.keys())[list(self.pieces.values()).index((x, y))]
+            
+            if (piece[1] == "W") == self.turn: # switch turns
+                # while mouse is being pressed, get the piece to move.
+                self.movePiece = list(self.pieces.keys())[list(self.pieces.values()).index((x, y))]
+                self.pieceRoutes = self.rules.moveRule(self.movePiece)
+
+        if not pygame.mouse.get_pressed()[0] and self.movePiece:
+            # after the hold, self.movePiece should be in current mouse pos
+            self.updatePos((x, y))
+
+    def updatePos(self, position):
+        _x, _y = position
+
+        if (_x, _y) not in self.pieces.values()\
+                    and (_x, _y) in self.pieceRoutes:
+                
+                self.pieces[self.movePiece] = (_x, _y)
+                self.rules.pieces = self.pieces
+                # check for possible castle and promotion
+                self.rules.castle(self.movePiece)
+                self.rules.promotion(self.movePiece)
+
+                self.switchTurn()
+        
+        elif (_x, _y) in self.rules.takes: self.take(_x, _y)
+        self.movePiece = None
+
+        self.pieceRoutes.clear()
+        self.rules.takes.clear()
+
+    def take(self, x, y):
+        # take if it's on opponent's piece
+        piece = list(self.pieces.keys())[list(self.pieces.values()).index((x, y))]
+        self.pieces.pop(piece) # take
+        self.pieces[self.movePiece] = (x, y)
+        
+        self.switchTurn()
+
+    def switchTurn(self):
+        # white first, black second, white, etc
+        # False if True, True if False
+        self.turn = not self.turn 
+
+    def grids(self):
+        WIDTH, HEIGHT = pygame.display.get_surface().get_size()
+        
+        for x in range(0, WIDTH, 100):
+            for y in range(0, HEIGHT, 100):
+                pygame.draw.rect(WIN, [217, 215, 204], (x+50, y+50, 50, 50))
+                pygame.draw.rect(WIN, [217, 215, 204], (x, y, 50, 50))
+
+    def draw(self):
+        # redraw pygame stuff
+        WIN.fill((186, 183, 168))
+
+        self.grids()
+        if len(self.rules.takes) > 0:
+            for take in self.rules.takes:
+                pygame.draw.circle(WIN, [136, 133, 118], (take[0]+26, take[1]+25), 20, 5)
+
+        for route in self.pieceRoutes:
+            pygame.draw.circle(WIN, [136, 133, 118], (route[0]+25, route[1]+25), 5)
+            
+        for piece in self.pieces.keys():
+            WIN.blit(self.imgs[piece[:2]], self.pieces[piece])
+
+        pygame.display.update()
+
+def main():
+    board = Board()
+    
+    while True:
+        CLOCK.tick(1000)
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT: sys.exit()
+        
+        # visualize/draw the board
+        board.move()
+        board.draw()
+
+if __name__ == "__main__":
+    main()
